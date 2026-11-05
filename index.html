@@ -215,6 +215,14 @@ kbd{font-family:var(--display);font-size:11px;padding:1px 6px;border-radius:5px;
 .nick-help{font-size:12px;color:var(--ink-soft);margin:-4px 0 14px!important;line-height:1.5}
 .nick-lbl .opt{font-family:var(--body);font-size:12px;color:var(--ink-soft)}
 .top3{margin-top:18px}
+.modes{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px}
+.mode-btn{border:2px solid rgba(34,28,23,.2);border-radius:10px;padding:10px 6px;background:#fff;color:var(--ink);font:inherit;cursor:pointer;text-align:center;display:flex;flex-direction:column;gap:2px}
+.mode-btn b{font-family:var(--display);font-weight:400;font-size:17px}
+.mode-btn small{font-size:13px;color:var(--ink-soft);word-break:keep-all}
+.mode-btn[aria-pressed="true"] b::before{content:'✓ '}
+.mode-btn[aria-pressed="true"]{border-color:var(--ketchup);background:#fdebc2}
+.mode-btn:focus-visible{outline:2px solid var(--ketchup);outline-offset:2px}
+.r-mode{display:inline-block;margin-left:6px;padding:0 5px;border-radius:4px;background:rgba(0,0,0,.07);font-family:var(--body);font-size:10px;color:var(--ink-soft);vertical-align:2px;white-space:nowrap}
 .rank-wrap{overflow-x:auto;margin-bottom:16px}
 .rank{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
 .rank th{font-size:11px;letter-spacing:.06em;color:var(--ink-soft);text-align:left;font-weight:400;padding:4px 8px;border-bottom:1px solid rgba(34,28,23,.2)}
@@ -297,7 +305,15 @@ kbd{font-family:var(--display);font-size:11px;padding:1px 6px;border-radius:5px;
 
 <script>
 (function(){
-const DAY_LEN = 150, COOK = 5, BURN = 11, MAX_LAYERS = 10;
+const DAY_LEN = 150, COOK = 5, MAX_LAYERS = 10;
+let BURN = 11;
+/* 난이도: burn 패티가 타는 시각, free 자유 주문 비율, n 자유 주문 속재료 수, maxLen 메뉴 최대 길이, spawn 손님 간격 배율 */
+const DIFFS = {
+  easy:  {label:'쉬움',   ex:'짧은 버거', burn:16, free:.15, n:[2,3], maxLen:5,  spawn:1.3},
+  normal:{label:'보통',   ex:'기본',      burn:11, free:.25, n:[2,5], maxLen:99, spawn:1},
+  hard:  {label:'어려움', ex:'긴 버거·빨리 탐', burn:8, free:.45, n:[3,6], maxLen:99, spawn:.75}
+};
+let difficulty = 'normal';
 const ING = {bottom:'아래빵', top:'위빵', patty:'패티', rawpatty:'덜 익은 패티', cheese:'치즈', lettuce:'양상추', tomato:'토마토', egg:'계란프라이',
   onion:'양파', mushroom:'버섯', pineapple:'파인애플', bacon:'베이컨', pickle:'피클', avocado:'아보카도', kimchi:'김치', shrimp:'새우'};
 const BINS = [
@@ -383,27 +399,34 @@ function newState(day, total){
 }
 function makeCustomer(day){
   let name, st;
-  const chance = .25;
+  const D = DIFFS[difficulty], chance = D.free;
   if(Math.random() < chance){
     const fillings = ['patty', ...BINS.filter(b => b.day <= day && b.k !== 'bottom' && b.k !== 'top').map(b => b.k)];
-    const mid = [], n = 2 + Math.floor(Math.random()*4);
+    const mid = [], n = D.n[0] + Math.floor(Math.random()*(D.n[1] - D.n[0] + 1));
     for(let i=0;i<n;i++) mid.push(pick(fillings));
     const r1 = Math.random(), r2 = Math.random();
     const first = r1 < .8 ? 'bottom' : r1 < .9 ? 'lettuce' : 'top';
     const last  = r2 < .8 ? 'top' : r2 < .9 ? 'lettuce' : 'bottom';
     st = [first, ...mid, last]; name = pick(FREE_TITLES);
   } else {
-    const pool = MENU.filter(m => m.day <= day);
+    const all = MENU.filter(m => m.day <= day), short = all.filter(m => m.st.length <= D.maxLen);
+    let pool = short.length ? short : all;
+    if(difficulty === 'hard' && Math.random() < .6){ const long = pool.filter(m => m.st.length >= 6); if(long.length) pool = long; }
     const fresh = pool.filter(m => m.day === Math.min(day,4));
     const m = (fresh.length && Math.random() < .45) ? pick(fresh) : pick(pool);
     st = m.st.slice(); name = m.name;
   }
   const max = Math.max(28, 52 - (day-1)*4) + Math.max(0, st.length-4)*3;
-  const initial = Math.random() < .35;
+  const initial = orderMode === 'initial' ? true : orderMode === 'poem' ? false : Math.random() < .35;
   return {id:++cid, name, st, initial, poem:poemFor(st, initial), max, p:max, state:'wait', leaveT:0,
     look:{skin:pick(SKIN), hair:pick(HAIR), shirt:pick(SHIRT)}};
 }
 
+const MODES = {
+  initial:{label:'첫 글자', ex:'양○○'},
+  poem:{label:'비유', ex:'초록 들판'},
+  mix:{label:'섞어서', ex:'둘 다'}
+};
 /* 주문표: 버거 모양 그대로 위 → 아래, 같은 재료가 이어지면 ×2 */
 const initialOf = k => ING[k][0] + '○'.repeat(ING[k].length - 1);
 function poemFor(st, initial){
@@ -600,7 +623,7 @@ function update(dt){
       const free = S.seats.findIndex(s => !s);
       if(free >= 0){
         S.seats[free] = makeCustomer(S.day); renderSeats();
-        S.spawnT = Math.max(2.5, rand(5,10) - (DAY_LEN - S.time) / 30);
+        S.spawnT = Math.max(2.5, rand(5,10) - (DAY_LEN - S.time) / 30) * DIFFS[difficulty].spawn;
       }
     }
   }
@@ -632,15 +655,17 @@ function showOverlay(html, mode){
 function hideOverlay(){ $('overlay').hidden = true; S.mode = 'play'; }
 
 /* ---------- 닉네임 · 랭킹 ---------- */
-let nick = '', nickDraft = '', phone = '', uid = null, lastRunId = null, lastEndHTML = '', saveNote = '', rankBack = null, saving = false;
+let orderMode = 'mix', nick = '', nickDraft = '', phone = '', uid = null, lastRunId = null, lastEndHTML = '', saveNote = '', rankBack = null, saving = false;
 try{ nickDraft = localStorage.getItem('dutum-nick') || ''; }catch(e){}
+try{ const m = localStorage.getItem('dutum-mode'); if(MODES[m]) orderMode = m; }catch(e){}
+try{ const d = localStorage.getItem('dutum-diff'); if(DIFFS[d]) difficulty = d; }catch(e){}
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmtPhone = d => d.startsWith('02') ? d.replace(/^(\d{2})(\d{3,4})(\d{4})$/, '$1-$2-$3') : d.replace(/^(\d{3})(\d{3,4})(\d{4})$/, '$1-$2-$3');
 const R = {db:null, rows:[], status:'loading'};
 const byScore = (a,b) => (b.total - a.total) || (b.day - a.day) || (a.at - b.at);
 function cleanRow(id, d){
   if(!d || typeof d.nick !== 'string' || !d.nick.trim()) return null;
-  return {id, nick:d.nick.slice(0,12), total:Math.max(0, Math.round((+d.total || 0) * 2) / 2), day:Math.max(1, Math.floor(+d.day || 1)), at:+d.at || 0};
+  return {id, nick:d.nick.slice(0,12), total:Math.max(0, Math.round((+d.total || 0) * 2) / 2), day:Math.max(1, Math.floor(+d.day || 1)), at:+d.at || 0, mode:MODES[d.mode] ? d.mode : '', diff:DIFFS[d.diff] ? d.diff : ''};
 }
 function localRows(){
   try{ return (JSON.parse(localStorage.getItem('dutum-rank')) || []).map(r => cleanRow(r.id, r)).filter(Boolean).sort(byScore); }catch(e){ return []; }
@@ -662,7 +687,7 @@ async function initRanking(){
   }, () => { clearTimeout(timer); R.db = null; R.status = 'local'; R.rows = localRows(); refreshRank(); });
 }
 async function saveRun(){
-  const run = {nick, total:S.total, day:S.day, at:Date.now()};
+  const run = {nick, total:S.total, day:S.day, at:Date.now(), mode:orderMode, diff:difficulty};
   if(R.db){
     try{
       const ref = await R.db.collection('scores').add(run);
@@ -692,7 +717,7 @@ function statusLine(){
 function rankTable(n){
   if(!R.rows.length) return `<p class="rank-empty">${R.status === 'loading' ? '랭킹을 불러오는 중이에요…' : '아직 기록이 없어요. 첫 번째 사장님이 되어 보세요!'}</p>`;
   return `<div class="rank-wrap"><table class="rank"><thead><tr><th>순위</th><th>닉네임</th><th>버거</th><th>날짜</th></tr></thead><tbody>${
-    R.rows.slice(0,n).map((r,i) => `<tr class="${r.id === lastRunId ? 'me' : ''}"><td>${i+1}</td><td>${esc(r.nick)}</td><td>${fmtN(r.total)}개</td><td>${r.at ? new Date(r.at).toLocaleDateString('ko-KR',{month:'numeric',day:'numeric'}) : ''}</td></tr>`).join('')
+    R.rows.slice(0,n).map((r,i) => `<tr class="${r.id === lastRunId ? 'me' : ''}"><td>${i+1}</td><td>${esc(r.nick)}${r.mode || r.diff ? `<span class="r-mode">${[r.diff && DIFFS[r.diff].label, r.mode && MODES[r.mode].label].filter(Boolean).join('·')}</span>` : ''}</td><td>${fmtN(r.total)}개</td><td>${r.at ? new Date(r.at).toLocaleDateString('ko-KR',{month:'numeric',day:'numeric'}) : ''}</td></tr>`).join('')
   }</tbody></table></div>`;
 }
 function openRank(back){
@@ -712,18 +737,25 @@ function backFor(){
   return showStart;
 }
 
+function pickHTML(group, title, opts, cur){
+  return `<div class="nick-lbl" id="${group}Lbl">${title}</div>
+    <div class="modes" role="group" aria-labelledby="${group}Lbl">${Object.entries(opts).map(([k, m]) =>
+      `<button class="mode-btn" type="button" data-pick="${group}" data-v="${k}" aria-pressed="${k === cur}"><b>${m.label}</b><small>${m.ex}</small></button>`).join('')}</div>`;
+}
 function showStart(){
   showOverlay(`
     <h1>두툼버거 주방</h1>
     <p>오늘부터 버거 가게 사장님! 손님 주문표를 보고 버거를 <b>아래에서부터</b> 차곡차곡 쌓아 주세요.</p>
     <ol>
       <li>그릴에 <b>생패티</b>를 올리고, 갈색으로 익으면 눌러서 접시에 담아요. 덜 익었을 때 담으면 그 버거는 <b>0.5개</b>로만 쳐요. 너무 오래 두면 타요.</li>
-      <li>주문표는 <b>버거 모양 그대로</b> 맨 위 재료부터 적혀 있어요. 재료 이름 대신 <b>비유</b>로 적혀 있어요. 가끔은 재료 이름의 <b>첫 글자</b>만 적힌 주문표도 와요. ○ 하나가 가려진 글자 하나예요. (예: 양○○ = 양상추)</li>
+      <li>주문표는 <b>버거 모양 그대로</b> 맨 위 재료부터 적혀 있어요. 재료 이름은 <b>비유</b>(초록 들판 = 양상추)나 <b>첫 글자</b>(양○○ = 양상추)로 적혀 있어요.</li>
       <li>다 만들면 <b>손님을 눌러</b> 서빙해요. 손님은 버거가 나올 때까지 기다려 줘요.</li>
       <li>장사는 딱 하루, <b>150초</b>예요. 그동안 낸 버거 개수가 랭킹에 올라가요. 시간이 갈수록 손님이 더 자주 와요.</li>
     </ol>
     <p>버거라고 늘 빵으로 시작하지는 않아요. 빵 없이 잎으로 감싸거나, 거꾸로 뒤집힌 주문도 있어요. 주문표에 적힌 순서가 정답이에요.</p>
     <div class="keys">키보드: <kbd>1</kbd>~<kbd>0</kbd>, <kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><kbd>F</kbd> 재료 · <kbd>P</kbd> 패티 굽기 · <kbd>Space</kbd> 익은 패티 담기 · <kbd>Q</kbd><kbd>W</kbd><kbd>E</kbd> 서빙 · <kbd>Z</kbd> 빼기 · <kbd>X</kbd> 버리기</div>
+    ${pickHTML('mode', '주문표는 어떻게 받을까요?', MODES, orderMode)}
+    ${pickHTML('diff', '난이도', DIFFS, difficulty)}
     <label class="nick-lbl" for="nickInput">이번 게임 닉네임</label>
     <input class="nick" id="nickInput" maxlength="12" autocomplete="off" placeholder="예: 버거왕" value="${esc(nickDraft)}">
     <p class="nick-err" id="nickErr" hidden>닉네임을 한 글자 이상 적어 주세요.</p>
@@ -741,7 +773,7 @@ function startGame(){
   const pIn = $('phoneInput'), raw = pIn ? pIn.value.trim() : '', digits = raw.replace(/\D/g, '');
   if(raw && !/^0\d{8,10}$/.test(digits)){ $('phoneErr').hidden = false; pIn.focus(); return; }
   phone = digits ? fmtPhone(digits) : '';
-  nick = nickDraft = v; lastRunId = null;
+  nick = nickDraft = v; lastRunId = null; BURN = DIFFS[difficulty].burn;
   try{ localStorage.setItem('dutum-nick', v); }catch(e){}
   startDay(1, 0);
 }
@@ -791,6 +823,14 @@ function statsHTML(){
 
 /* ---------- 입력 ---------- */
 $('card').addEventListener('click', e => {
+  const mb = e.target.closest('[data-pick]');
+  if(mb){
+    const g = mb.dataset.pick, v = mb.dataset.v;
+    if(g === 'mode') orderMode = v; else difficulty = v;
+    try{ localStorage.setItem(g === 'mode' ? 'dutum-mode' : 'dutum-diff', v); }catch(e){}
+    $('card').querySelectorAll(`[data-pick="${g}"]`).forEach(b => b.setAttribute('aria-pressed', b === mb));
+    return;
+  }
   const act = e.target.closest('[data-act]')?.dataset.act;
   if(!act) return;
   if(act === 'start') return startGame();
