@@ -706,6 +706,8 @@ async function savePhone(run){
   if(!uid) return ' 전화번호는 저장되지 않았어요.';
   try{
     await R.db.collection('contacts/' + uid + '/runs').add({nick, phone, total:run.total, scoreId:run.id, at:run.at});
+    /* 만든 사람이 전화번호를 모아 볼 수 있도록 사용자별 목록 문서도 남김 */
+    await R.db.doc('contacts/' + uid).set({nick, phone, at:run.at});
     return ' 전화번호는 만든 사람만 볼 수 있게 저장했어요.';
   }catch(e){ return ' 전화번호는 저장하지 못했어요.'; }
 }
